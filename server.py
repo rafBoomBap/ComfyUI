@@ -79,7 +79,7 @@ class PromptServer():
             middlewares.append(create_cors_middleware(args.enable_cors_header))
 
         max_upload_size = round(args.max_upload_size * 1024 * 1024)
-        self.app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
+
         self.sockets = dict()
         self.web_root = os.path.join(os.path.dirname(
             os.path.realpath(__file__)), "web")
@@ -526,17 +526,32 @@ class PromptServer():
                     self.prompt_queue.delete_history_item(id_to_delete)
 
             return web.Response(status=200)
-        
+
+        # Routes will be added to the sub_app
+        # If there is no base-url the app is the sub_app
+        if args.base_url == '/':
+            self.sub_app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
+            self.app = self.sub_app
+            self.add_routes()
+        elif args.base_url.startswith('/') and len(args.base_url) > 1:
+            self.app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
+            self.sub_app = web.Application()
+            args.base_url += '/' if not args.base_url.endswith('/') else args.base_url
+            self.add_routes()
+            self.app.add_subapp(args.base_url, self.sub_app)
+        else:
+            raise ValueError('--base-url should begin with "/"')
+
     def add_routes(self):
         self.user_manager.add_routes(self.routes)
-        self.app.add_routes(self.routes)
+        self.sub_app.add_routes(self.routes)
 
         for name, dir in nodes.EXTENSION_WEB_DIRS.items():
-            self.app.add_routes([
+            self.sub_app.add_routes([
                 web.static('/extensions/' + urllib.parse.quote(name), dir),
             ])
 
-        self.app.add_routes([
+        self.sub_app.add_routes([
             web.static('/', self.web_root),
         ])
 
@@ -621,14 +636,14 @@ class PromptServer():
             await self.send(*msg)
 
     async def start(self, address, port, verbose=True, call_on_start=None):
-        runner = web.AppRunner(self.app, access_log=None)
+        runner = web.AppRunner(self.sub_app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, address, port)
         await site.start()
 
         if verbose:
             logging.info("Starting server\n")
-            logging.info("To see the GUI go to: http://{}:{}".format(address, port))
+            logging.info("To see the GUI go to: http://{}:{}{}".format(address, port, args.base_url))
         if call_on_start is not None:
             call_on_start(address, port)
 

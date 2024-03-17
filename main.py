@@ -217,7 +217,6 @@ if __name__ == "__main__":
 
     cuda_malloc_warning()
 
-    server.add_routes()
     hijack_progress(server)
 
     threading.Thread(target=prompt_worker, daemon=True, args=(q, server,)).start()
